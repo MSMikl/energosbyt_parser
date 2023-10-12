@@ -1,0 +1,7 @@
+/.venv
+/.vscode
+*__pycache__*
+.env
+docker-compose.yml
+db.sqlite3
+prices.xlsx
