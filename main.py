@@ -5,15 +5,27 @@ import aiohttp
 
 import settings
 
+from aiohttp import web
 from apscheduler import AsyncScheduler
 from apscheduler.triggers.interval import IntervalTrigger
 from datetime import datetime, timedelta
 
 import asyncio
 
+
+class State:
+    states = {
+        'binary': 'off',
+        'state': '',
+        'count': 0,
+    }
+
+
 logger = logging.getLogger(__name__)
 
+
 async def check_plans(url, params: dict[str] = {}, timeout: int = 120, retries: int = 3):
+    logger.info('start parsing')
     timeout = aiohttp.ClientTimeout(timeout)
     now = datetime.now()
     params.update({
@@ -37,7 +49,8 @@ async def check_plans(url, params: dict[str] = {}, timeout: int = 120, retries: 
                 response.raise_for_status()
             except TimeoutError:
                 retries -= 1
-                logger.info(f'Parsing timeout. Trying again. {retries} retries remaining')
+                logger.info(
+                    f'Parsing timeout. Trying again. {retries} retries remaining')
                 continue
             else:
                 break
@@ -46,50 +59,57 @@ async def check_plans(url, params: dict[str] = {}, timeout: int = 120, retries: 
             return
         results = (await response.json()).get('items', [])
     if len(results) == 0:
-        binary = 'off'
-        state = ''
+        State.states['binary'] = 'off'
+        State.states['state'] = ''
+        State.states['count'] = 0
     else:
-        binary = 'on'
-        state = '\n'.join([f"{result.get('From')} - {result.get('To', '').split(',')[1]}"
-                            for result in results])
-    binary_hass_url = f"{settings.HASS_URL}api/states/{settings.HASS_BINARY_SENSOR_NAME}"
-    state_hass_url = f"{settings.HASS_URL}api/states/{settings.HASS_STATE_SENSOR_NAME}"
-    headers = {
-        'Content-Type': 'application/json',
-        'Authorization': f'Bearer {settings.HASS_API_TOKEN}'
-    }
-    binary_data = {"state": binary}
-    state_data = {"state": state}
-    async with aiohttp.ClientSession() as session:
-        response = await session.post(binary_hass_url, headers=headers, json=binary_data)
-        logger.info(await response.text())
-        response = await session.post(state_hass_url, headers=headers, json=state_data)
-        logger.info(await response.text())
+        State.states['binary'] = 'on'
+        State.states['state'] = '\n'.join([f"{result.get('From')} - {result.get('To', '').split(',')[1]}"
+                                           for result in results])
+        State.states['count'] = len(results)
+
+
+async def give_shutdowns(request: web.BaseRequest):
+    logger.info(f"Handling response from {request.remote}")
+    return web.json_response(State.states)
+
+
+async def server(request: web.BaseRequest):
+    if (request.path == '/shutdowns/' and request.method == 'GET'):
+        return await give_shutdowns(request)
+    return web.HTTPNotFound()
 
 
 async def checker():
+    logger.setLevel(settings.LOG_LEVEL)
+    stream_handler = logging.StreamHandler()
+    stream_handler.setLevel(settings.LOG_LEVEL)
+    logger.addHandler(stream_handler)
+    url = settings.PARSING_URL
+    params = {
+        'region': 'п. Инеш, ул. М.Джалиля, д. 11',
+        'manualSettlement': 'п. Инеш, ул. М.Джалиля, д. 11',
+        'orderDirection': 0,
+        'page': 1,
+        'isSettlement': 'true',
+        'isManualStreet': 'true',
+        'pageSize': 10
+    }
+
     async with AsyncScheduler() as scheduler:
-        logger.setLevel(settings.LOG_LEVEL)
-        stream_handler = logging.StreamHandler()
-        stream_handler.setLevel(settings.LOG_LEVEL)
-        logger.addHandler(stream_handler)
-        url = settings.PARSING_URL
-        params = {
-            'region': 'п. Инеш, ул. М.Джалиля, д. 11',
-            'manualSettlement': 'п. Инеш, ул. М.Джалиля, д. 11',
-            'orderDirection': 0,
-            'page': 1,
-            'isSettlement': 'true',
-            'isManualStreet': 'true',
-            'pageSize': 10
-        }
         await scheduler.add_schedule(check_plans, IntervalTrigger(seconds=settings.PARSING_INTERVAL),
                                      kwargs={
-                                         'url': url,
-                                         'params': params,
-                                     })
+            'url': url,
+            'params': params,
+        })
         scheduler.logger.setLevel(logging.DEBUG)
         scheduler.logger.addHandler(logging.StreamHandler())
+        handler = web.Server(server)
+        runner = web.ServerRunner(handler)
+        await runner.setup()
+        site = web.TCPSite(runner, '0.0.0.0', 8080)
+        await site.start()
+        logger.info("======= Serving on http://127.0.0.1:8080/ ======")
         await scheduler.run_until_stopped()
 
 
