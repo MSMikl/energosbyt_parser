@@ -57,7 +57,9 @@ async def check_plans(url, params: dict[str] = {}, timeout: int = 120, retries: 
         if not response.status or response.status != 200:
             logger.warning(f'Parsing unsuccessful')
             return
-        results = (await response.json()).get('items', [])
+        parsed_response = await response.json()
+        logger.debug(parsed_response)
+        results = parsed_response.get('items', [])
     if len(results) == 0:
         State.states['binary'] = 'off'
         State.states['state'] = ''
