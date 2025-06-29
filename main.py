@@ -59,16 +59,17 @@ async def check_plans(url, params: dict[str] = {}, timeout: int = 120, retries: 
             return
         parsed_response = await response.json()
         logger.debug(parsed_response)
-        results = parsed_response.get('items', [])
+        results = parsed_response.get('Model', {}).get('AllDataModel', [])
     if len(results) == 0:
         State.states['binary'] = 'off'
         State.states['state'] = ''
         State.states['count'] = 0
     else:
         State.states['binary'] = 'on'
-        State.states['state'] = '\n'.join([f"{result.get('From')} - {result.get('To', '').split(',')[1]}"
-                                           for result in results])
-        State.states['count'] = len(results)
+        unique_results = {f"{result.get('From')} - {result.get('To')} ({result.get('Description')}, {result.get('Condition')})": result for result in results}.values()
+        State.states['state'] = '\n'.join([f"{result.get('From')} - {result.get('To')} ({result.get('Description')}, {result.get('Condition')})"
+                                           for result in unique_results])
+        State.states['count'] = len(unique_results)
 
 
 async def give_shutdowns(request: web.BaseRequest):
@@ -87,15 +88,13 @@ async def checker():
     stream_handler = logging.StreamHandler()
     stream_handler.setLevel(settings.LOG_LEVEL)
     logger.addHandler(stream_handler)
-    url = settings.PARSING_URL
+    url = "https://pdo.gridcom-rt.ru/api/Ajax/GetInterruptions"
     params = {
-        'region': 'п. Инеш, ул. М.Джалиля, д. 11',
-        'manualSettlement': 'п. Инеш, ул. М.Джалиля, д. 11',
-        'orderDirection': 0,
-        'page': 1,
-        'isSettlement': 'true',
-        'isManualStreet': 'true',
-        'pageSize': 10
+        'SearchText': 'п Инеш, М.Джалиля, д. 11,',
+        'Page': 1,
+        'PageSize': 5,
+        'From': '',
+        'To': ''
     }
 
     async with AsyncScheduler() as scheduler:
