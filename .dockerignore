@@ -1,0 +1,12 @@
+**/*.git*
+/.venv
+/.vscode
+**/__pycache__
+.env
+.gitignore
+*README*
+*LICENSE*
+*docker*
+db.sqlite3
+/db_data
+/bot_logs
