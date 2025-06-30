@@ -102,6 +102,7 @@ async def check_plans(url, params: dict[str] = {}, timeout: int = 120, retries: 
             time_start=parser.parse(preprocess_date(result.get('From'))),
             time_end=parser.parse(preprocess_date(result.get('To'))),
         ))
+        unique_results.add(state)
     if len(CurrentStates.items) == 0:
         CurrentStates.binary = 'off'
     else:
