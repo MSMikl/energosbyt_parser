@@ -113,7 +113,7 @@ async def give_shutdowns(request: web.BaseRequest):
     return web.json_response({
         "binary": CurrentStates.binary,
         "last_checked": CurrentStates.last_checked.isoformat(),
-        "items": [
+        "records": [
             {
                 "state": item.state,
                 "time_start": item.time_start.isoformat(),
