@@ -1,5 +1,6 @@
 import asyncio
 import logging
+from dateutil import parser
 
 import aiohttp
 
@@ -11,14 +12,42 @@ from apscheduler.triggers.interval import IntervalTrigger
 from datetime import datetime, timedelta
 
 import asyncio
+from dataclasses import dataclass
 
+# Mapping of Russian month names to English
+MONTHS_MAP = {
+    "января": "January",
+    "февраля": "February",
+    "марта": "March",
+    "апреля": "April",
+    "мая": "May",
+    "июня": "June",
+    "июля": "July",
+    "августа": "August",
+    "сентября": "September",
+    "октября": "October",
+    "ноября": "November",
+    "декабря": "December"
+}
 
+def preprocess_date(date_str):
+    for ru_month, en_month in MONTHS_MAP.items():
+        if ru_month in date_str:
+            date_str = date_str.replace(ru_month, en_month)
+            break
+    return date_str
+
+@dataclass
 class State:
-    states = {
-        'binary': 'off',
-        'state': '',
-        'count': 0,
-    }
+    state: str = ''
+    time_start: datetime = datetime.now()
+    time_end: datetime = datetime.now()
+    binary: str = 'off'
+
+class CurrentStates:
+    binary: str = 'off'
+    last_checked = datetime.now()
+    items: list[State] = []
 
 
 logger = logging.getLogger(__name__)
@@ -60,21 +89,39 @@ async def check_plans(url, params: dict[str] = {}, timeout: int = 120, retries: 
         parsed_response = await response.json()
         logger.debug(parsed_response)
         results = parsed_response.get('Model', {}).get('AllDataModel', [])
-    if len(results) == 0:
-        State.states['binary'] = 'off'
-        State.states['state'] = ''
-        State.states['count'] = 0
+    CurrentStates.last_checked = datetime.now()
+    CurrentStates.items = []
+    unique_results = set()
+    for result in results:
+        state = f"{result.get('From')} - {result.get('To')} ({result.get('Description')}, {result.get('Condition')})"
+        if state in unique_results:
+            continue
+        CurrentStates.items.append(State(
+            binary='on',
+            state=state,
+            time_start=parser.parse(preprocess_date(result.get('From'))),
+            time_end=parser.parse(preprocess_date(result.get('To'))),
+        ))
+    if len(CurrentStates.items) == 0:
+        CurrentStates.binary = 'off'
     else:
-        State.states['binary'] = 'on'
-        unique_results = {f"{result.get('From')} - {result.get('To')} ({result.get('Description')}, {result.get('Condition')})": result for result in results}.values()
-        State.states['state'] = '\n'.join([f"{result.get('From')} - {result.get('To')} ({result.get('Description')}, {result.get('Condition')})"
-                                           for result in unique_results])
-        State.states['count'] = len(unique_results)
+        CurrentStates.binary = 'on'
 
 
 async def give_shutdowns(request: web.BaseRequest):
     logger.info(f"Handling response from {request.remote}")
-    return web.json_response(State.states)
+    return web.json_response({
+        "binary": CurrentStates.binary,
+        "last_checked": CurrentStates.last_checked.isoformat(),
+        "items": [
+            {
+                "state": item.state,
+                "time_start": item.time_start.isoformat(),
+                "time_end": item.time_end.isoformat()
+            }
+            for item in CurrentStates.items
+        ]
+    })
 
 
 async def server(request: web.BaseRequest):
